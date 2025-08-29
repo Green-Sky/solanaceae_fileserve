@@ -1,0 +1,285 @@
+#include "./fileserve.hpp"
+
+#include <solanaceae/contact/components.hpp>
+#include <solanaceae/contact/contact_store_i.hpp>
+
+#include <solanaceae/message3/message_command_dispatcher.hpp>
+#include <solanaceae/message3/components.hpp>
+
+#include <solanaceae/util/config_model.hpp>
+
+// TODO: move human readable to util
+//#include <solanaceae/util/
+
+#include <filesystem>
+#include <string>
+#include <charconv>
+
+#include <iostream>
+
+FileServe::FileServe(
+	ConfigModelI& conf,
+	MessageCommandDispatcher& mcd,
+	RegistryMessageModelI& rmm,
+	ContactStore4I& cs
+) : _conf(conf), _mcd(mcd), _rmm(rmm), _cs(cs)
+{
+	scanDirs();
+
+	_mcd.registerCommand(
+		"FileServe", "fserve",
+		"list",
+		[this](std::string_view params, Message3Handle m) -> bool { return comList(params, m); },
+		"List served files",
+		MessageCommandDispatcher::Perms::EVERYONE
+	);
+
+	_mcd.registerCommand(
+		"FileServe", "fserve",
+		"get",
+		[this](std::string_view params, Message3Handle m) -> bool { return comGet(params, m); },
+		"Get file by id (use list/search)",
+		MessageCommandDispatcher::Perms::EVERYONE
+	);
+
+	_mcd.registerCommand(
+		"FileServe", "fserve",
+		"post",
+		[this](std::string_view params, Message3Handle m) -> bool { return comPost(params, m); },
+		"Post file by id. If in group, this will be visible by everyone.",
+		//MessageCommandDispatcher::Perms::MODERATOR
+		MessageCommandDispatcher::Perms::EVERYONE // TODO: fix moderator
+	);
+
+	_mcd.registerCommand(
+		"FileServe", "fserve",
+		"search",
+		[this](std::string_view params, Message3Handle m) -> bool { return comSearch(params, m); },
+		"Seach for file matching <string>.",
+		MessageCommandDispatcher::Perms::MODERATOR
+	);
+
+	_mcd.registerCommand(
+		"FileServe", "fserve",
+		"rescan",
+		[this](std::string_view params, Message3Handle m) -> bool { return comRescan(params, m); },
+		"Rescan configured directories.",
+		MessageCommandDispatcher::Perms::ADMIN
+	);
+}
+
+bool FileServe::scanDirs(void) {
+	bool succ = true;
+	for (const auto [dir_path, enable] : _conf.entries_bool("FileServe", "dirs")) {
+		if (enable) {
+			succ = succ && addDir(dir_path);
+		}
+	}
+
+	return succ;
+}
+
+bool FileServe::addDir(std::string_view dir_path) {
+	try {
+		// TODO: maybe make absolute in case wd changes?
+		const std::filesystem::path dir{std::filesystem::canonical(dir_path)};
+		if (!std::filesystem::exists(dir)) {
+			std::cerr << "FServe: error, path does not exist '" << dir_path << "'\n";
+			return false;
+		}
+
+		if (!std::filesystem::is_directory(dir)) {
+			std::cerr << "FServe: error, path not a directory '" << dir_path << "'\n";
+			return false;
+		}
+
+		std::cout << "FServe: scanning '" << dir.generic_u8string() << "'\n";
+		// TODO: thread this
+		for (auto const& dir_entry : std::filesystem::directory_iterator(dir)) {
+			try {
+				if (dir_entry.is_directory()) {
+					// TODO: recurse
+					continue;
+				} else if (!dir_entry.is_regular_file()) {
+					continue;
+				}
+
+				const auto& filepath = dir_entry.path();
+				const auto& filename = filepath.filename().generic_u8string();
+
+				if (filename.empty()) {
+					continue;
+				}
+
+				if (filename.at(0) == '.') {
+					continue; // skip hidden files
+				}
+
+				const auto file_size = static_cast<int64_t>(dir_entry.file_size());
+				if (file_size == 0) {
+					continue; // skip empty files
+				}
+
+				// TODO: check read perm?
+
+				FileEntry fe{
+					filepath.parent_path().generic_u8string(),
+					filename,
+					file_size
+				};
+				addEntry(std::move(fe));
+			} catch (...) {
+				// moving filesystem might throw
+				continue;
+			}
+		}
+	} catch (const std::filesystem::filesystem_error& e) {
+		std::cerr << "FServe: fs exception thrown for '" << dir_path << "' with " << e.what() << "\n";
+		return false;
+	} catch (...) {
+		std::cerr << "FServe: exception thrown for '" << dir_path << "'\n";
+		return false;
+	}
+	return true;
+}
+
+bool FileServe::addEntry(FileEntry&& entry) {
+	// find dupe
+
+	for (const auto& [path, name, size] : _file_list) {
+		// TODO: more sofistication
+		if (name == entry.filename) {
+			// TODO: maybe log
+			return false;
+		}
+	}
+	std::cout << " + " << entry.filename << "\n";
+
+	_file_list.emplace_back(entry);
+
+	return true;
+}
+
+bool FileServe::sendID(Contact4 from, Contact4 to, std::string_view params) {
+	int64_t value {0};
+
+	const auto fc_res = std::from_chars(params.data(), params.data()+params.size(), value);
+	if (fc_res.ec != std::errc{}) {
+		// TODO: log warning
+		_rmm.sendText(
+			from,
+			"error: invalid id (ec:" + std::make_error_code(fc_res.ec).message() + ")"
+		);
+		return true;
+	}
+
+	if (value < 0) {
+		// TODO: impl special stuff?
+		_rmm.sendText(
+			from,
+			"error: invalid id (negative)"
+		);
+		return true;
+	}
+
+	if (_file_list.size() <= size_t(value)) {
+		// invalid id
+		// TODO: log warning
+		_rmm.sendText(
+			from,
+			"error: invalid id"
+		);
+		return true;
+	}
+
+	const auto& requested_file = _file_list.at(value);
+
+	// TODO: error check
+	_rmm.sendFilePath(
+		to,
+		requested_file.filename,
+		std::string(requested_file.path) + "/" + requested_file.filename
+	);
+
+	return true;
+}
+
+bool FileServe::comList(std::string_view params, Message3Handle m) {
+	const auto contact_from = m.get<Message::Components::ContactFrom>().c;
+
+	_rmm.sendText(
+		contact_from,
+		"id - filesize - filename:"
+	);
+
+	// TODO: paged
+
+	std::string next_message;
+	next_message.reserve(1101);
+	for (size_t i = 0; i < _file_list.size(); i++) {
+		const auto& entry = _file_list.at(i);
+		std::string new_line;
+		new_line.reserve(20 + entry.filename.size());
+
+		new_line += std::to_string(i) + " - ";
+		// TODO: human readable
+		new_line += std::to_string(entry.size) + " - ";
+		new_line += "\"" + entry.filename + "\"";
+
+		// TODO: catch abnormal filename sizes
+
+		if (next_message.empty()) {
+			next_message = new_line;
+		} else if (next_message.size() + 1 + new_line.size() > 1100) {
+			_rmm.sendText(
+				contact_from,
+				next_message
+			);
+			next_message.clear();
+		} else {
+			next_message += "\n" + new_line;
+		}
+	}
+
+	if (!next_message.empty()) {
+		_rmm.sendText(
+			contact_from,
+			next_message
+		);
+	}
+
+	return true;
+}
+
+bool FileServe::comGet(std::string_view params, Message3Handle m) {
+	const auto contact_from = m.get<Message::Components::ContactFrom>().c;
+
+	return sendID(contact_from, contact_from, params);
+}
+
+bool FileServe::comPost(std::string_view params, Message3Handle m) {
+	const auto contact_from = m.get<Message::Components::ContactFrom>().c;
+	const auto contact_to = _cs.contactHandle(m.get<Message::Components::ContactTo>().c);
+	if (contact_to.any_of<Contact::Components::TagSelfWeak, Contact::Components::TagSelfStrong>()) {
+		// private -> equivalent to get
+		return sendID(contact_from, contact_from, params);
+	} else {
+		return sendID(contact_from, contact_to, params);
+	}
+}
+
+bool FileServe::comSearch(std::string_view params, Message3Handle m) {
+	const auto contact_from = m.get<Message::Components::ContactFrom>().c;
+	_rmm.sendText(
+		contact_from,
+		"ping green to implement"
+	);
+	return true;
+}
+
+bool FileServe::comRescan(std::string_view, Message3Handle) {
+	// TODO: maybe some feedback
+	scanDirs();
+	return true;
+}
+

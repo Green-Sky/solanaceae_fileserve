@@ -79,17 +79,17 @@ bool FileServe::scanDirs(void) {
 	return succ;
 }
 
-bool FileServe::addDir(std::string_view dir_path) {
+bool FileServe::addDir(std::string_view dir_path, std::string_view prefix) {
 	try {
 		// TODO: maybe make absolute in case wd changes?
-		const std::filesystem::path dir{std::filesystem::canonical(dir_path)};
+		const std::filesystem::path dir{std::filesystem::canonical(dir_path) / prefix};
 		if (!std::filesystem::exists(dir)) {
-			std::cerr << "FServe: error, path does not exist '" << dir_path << "'\n";
+			std::cerr << "FServe: error, path does not exist '" << dir_path << "' + '" << prefix << "'\n";
 			return false;
 		}
 
 		if (!std::filesystem::is_directory(dir)) {
-			std::cerr << "FServe: error, path not a directory '" << dir_path << "'\n";
+			std::cerr << "FServe: error, path not a directory '" << dir_path << "' + '" << prefix << "'\n";
 			return false;
 		}
 
@@ -97,15 +97,25 @@ bool FileServe::addDir(std::string_view dir_path) {
 		// TODO: thread this
 		for (auto const& dir_entry : std::filesystem::directory_iterator(dir)) {
 			try {
+				const auto& filepath = dir_entry.path();
+				const auto& filename = filepath.filename().generic_u8string();
+
 				if (dir_entry.is_directory()) {
-					// TODO: recurse
-					continue;
-				} else if (!dir_entry.is_regular_file()) {
+					std::string sub_prefix{prefix};
+					if (!sub_prefix.empty()) {
+						sub_prefix += "/";
+					}
+					sub_prefix += filename;
+
+					//addDir(dir_entry.path().generic_u8string(), sub_prefix);
+					addDir(dir_path, sub_prefix);
+
 					continue;
 				}
 
-				const auto& filepath = dir_entry.path();
-				const auto& filename = filepath.filename().generic_u8string();
+				if (!dir_entry.is_regular_file()) {
+					continue;
+				}
 
 				if (filename.empty()) {
 					continue;
@@ -123,8 +133,8 @@ bool FileServe::addDir(std::string_view dir_path) {
 				// TODO: check read perm?
 
 				FileEntry fe{
-					filepath.parent_path().generic_u8string(),
-					filename,
+					std::string{dir_path},
+					(prefix.empty() ? "" : std::string{prefix} + "/") + filename,
 					file_size
 				};
 				addEntry(std::move(fe));
@@ -194,10 +204,20 @@ bool FileServe::sendID(Contact4 from, Contact4 to, std::string_view params) {
 
 	const auto& requested_file = _file_list.at(value);
 
+	// trim prefix
+	std::string_view only_filename = requested_file.filename;
+	if (const auto pos = only_filename.find_last_of("/\\"); pos != only_filename.npos) {
+		if (pos + 1 >= only_filename.size()) {
+			// what
+			return true;
+		}
+		only_filename = only_filename.substr(pos + 1);
+	}
+
 	// TODO: error check
 	_rmm.sendFilePath(
 		to,
-		requested_file.filename,
+		only_filename, // TODO: dont trim and make clients support folders in name
 		std::string(requested_file.path) + "/" + requested_file.filename
 	);
 

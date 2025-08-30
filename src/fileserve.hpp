@@ -40,7 +40,8 @@ struct FileServe {
 		// adds dir and scans files
 		// TODO: async
 		// TODO: filter
-		bool addDir(std::string_view dir_path);
+		// for recursion, to preserve prefix as part of the path/name
+		bool addDir(std::string_view dir_path, std::string_view prefix = {});
 
 		bool addEntry(FileEntry&& entry);
 

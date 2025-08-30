@@ -297,8 +297,13 @@ bool FileServe::comSearch(std::string_view params, Message3Handle m) {
 	return true;
 }
 
-bool FileServe::comRescan(std::string_view, Message3Handle) {
-	// TODO: maybe some feedback
+bool FileServe::comRescan(std::string_view, Message3Handle m) {
+	const auto contact_from = m.get<Message::Components::ContactFrom>().c;
+	_rmm.sendText(
+		contact_from,
+		"starting rescan"
+	);
+	_file_list.clear();
 	scanDirs();
 	return true;
 }

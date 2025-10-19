@@ -255,7 +255,7 @@ bool FileServe::comList(std::string_view params, Message3Handle m) {
 				contact_from,
 				next_message
 			);
-			next_message.clear();
+			next_message = new_line;
 		} else {
 			next_message += "\n" + new_line;
 		}

@@ -8,12 +8,15 @@
 
 #include <solanaceae/util/config_model.hpp>
 
+#include <levenshtein.h>
+
 // TODO: move human readable to util
 //#include <solanaceae/util/
 
 #include <filesystem>
 #include <string>
 #include <charconv>
+#include <map>
 
 #include <iostream>
 
@@ -56,7 +59,7 @@ FileServe::FileServe(
 		"search",
 		[this](std::string_view params, Message3Handle m) -> bool { return comSearch(params, m); },
 		"Seach for file matching <string>.",
-		MessageCommandDispatcher::Perms::MODERATOR
+		MessageCommandDispatcher::Perms::EVERYONE
 	);
 
 	_mcd.registerCommand(
@@ -290,10 +293,67 @@ bool FileServe::comPost(std::string_view params, Message3Handle m) {
 
 bool FileServe::comSearch(std::string_view params, Message3Handle m) {
 	const auto contact_from = m.get<Message::Components::ContactFrom>().c;
+
+	if (params.empty()) {
+		_rmm.sendText(
+			contact_from,
+			"error: missing search term"
+		);
+		return true;
+	}
+
+	std::map<size_t, size_t> dist_to_file;
+	for (size_t i = 0; i < _file_list.size(); i++) {
+		const auto& entry = _file_list.at(i);
+		dist_to_file[levenshtein_n(entry.filename.c_str(), entry.filename.size(), params.data(), params.size())] = i;
+	}
+
 	_rmm.sendText(
 		contact_from,
-		"ping green to implement"
+		"id - dist - filesize - filename:"
 	);
+
+	std::string next_message;
+	next_message.reserve(1101);
+	{
+		auto it = dist_to_file.cbegin();
+		size_t i = 0;
+		for (; i < 10 && it != dist_to_file.cend(); i++, it++) {
+			const auto dist = it->first;
+			const auto file_index = it->second;
+			const auto& file_entry = _file_list.at(file_index);
+
+			std::string new_line;
+			new_line.reserve(20 + file_entry.filename.size());
+
+			new_line += std::to_string(file_index) + " - ";
+			new_line += std::to_string(dist) + " - ";
+
+			// TODO: human readable
+			new_line += std::to_string(file_entry.size) + " - ";
+			new_line += "\"" + file_entry.filename + "\"";
+
+			if (next_message.empty()) {
+				next_message = new_line;
+			} else if (next_message.size() + 1 + new_line.size() > 1100) {
+				_rmm.sendText(
+					contact_from,
+					next_message
+				);
+				next_message = new_line;
+			} else {
+				next_message += "\n" + new_line;
+			}
+		}
+	}
+
+	if (!next_message.empty()) {
+		_rmm.sendText(
+			contact_from,
+			next_message
+		);
+	}
+
 	return true;
 }
 

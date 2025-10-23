@@ -9,5 +9,6 @@ target_compile_features(fileserve PUBLIC cxx_std_17)
 target_link_libraries(fileserve PUBLIC
 	solanaceae_contact
 	solanaceae_message3
+	levenshtein
 )
 

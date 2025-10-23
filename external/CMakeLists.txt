@@ -53,3 +53,22 @@ if (NOT TARGET solanaceae_plugin)
 	FetchContent_MakeAvailable(solanaceae_plugin)
 endif()
 
+if (NOT TARGET levenshtein)
+	FetchContent_Declare(levenshtein
+		GIT_REPOSITORY https://github.com/wooorm/levenshtein.c
+		GIT_TAG ca084af84e591ec126093dc1607c235fbf00d6db # 2.0.2
+		EXCLUDE_FROM_ALL
+	)
+
+	FetchContent_GetProperties(levenshtein)
+	if(NOT levenshtein_POPULATED)
+		FetchContent_MakeAvailable(levenshtein)
+
+		add_library(levenshtein STATIC
+			${levenshtein_SOURCE_DIR}/levenshtein.h
+			${levenshtein_SOURCE_DIR}/levenshtein.c
+        )
+		target_include_directories(levenshtein PUBLIC ${levenshtein_SOURCE_DIR})
+		target_compile_features(levenshtein PUBLIC cxx_std_11)
+	endif()
+endif()

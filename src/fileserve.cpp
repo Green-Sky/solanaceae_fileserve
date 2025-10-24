@@ -10,6 +10,8 @@
 
 #include <levenshtein.h>
 
+#include "./string_view_split.hpp"
+
 // TODO: move human readable to util
 //#include <solanaceae/util/
 
@@ -17,7 +19,6 @@
 #include <string>
 #include <charconv>
 #include <map>
-#include <ranges>
 
 #include <iostream>
 #include <string_view>
@@ -309,11 +310,10 @@ bool FileServe::comSearch(std::string_view params, Message3Handle m) {
 		const auto& entry = _file_list.at(i);
 
 		size_t dist_sum = 0;
-		// TODO: replace more seperators with space eg -, _
-		for (const auto word : std::views::split(params, std::string_view{" "})) {
-			std::string sub_term {std::ranges::cdata(word), std::ranges::size(word)};
-
-			if (sub_term.empty()) continue;
+		for (const auto sub_term : MM::std_utils::split(params, " \t-_")) {
+			if (sub_term.empty()) { // is this possible?
+				continue;
+			}
 
 			if (entry.filename.size() <= sub_term.size()) {
 				dist_sum += levenshtein_n(entry.filename.c_str(), entry.filename.size(), sub_term.data(), sub_term.size());

@@ -311,7 +311,7 @@ bool FileServe::comSearch(std::string_view params, Message3Handle m) {
 		size_t dist_sum = 0;
 		// TODO: replace more seperators with space eg -, _
 		for (const auto word : std::views::split(params, std::string_view{" "})) {
-			std::string_view sub_term {word.begin(), word.end()};
+			std::string sub_term {std::ranges::cdata(word), std::ranges::size(word)};
 
 			if (sub_term.empty()) continue;
 

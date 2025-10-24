@@ -17,8 +17,10 @@
 #include <string>
 #include <charconv>
 #include <map>
+#include <ranges>
 
 #include <iostream>
+#include <string_view>
 
 FileServe::FileServe(
 	ConfigModelI& conf,
@@ -96,7 +98,7 @@ bool FileServe::addDir(std::string_view dir_path, std::string_view prefix) {
 			return false;
 		}
 
-		std::cout << "FServe: scanning '" << dir.generic_u8string() << "'\n";
+		std::cout << "FServe: scanning '" << reinterpret_cast<const char*>(dir.generic_u8string().c_str()) << "'\n";
 		// TODO: thread this
 		for (auto const& dir_entry : std::filesystem::directory_iterator(dir)) {
 			try {
@@ -108,7 +110,7 @@ bool FileServe::addDir(std::string_view dir_path, std::string_view prefix) {
 					if (!sub_prefix.empty()) {
 						sub_prefix += "/";
 					}
-					sub_prefix += filename;
+					sub_prefix += reinterpret_cast<const char*>(filename.c_str());
 
 					//addDir(dir_entry.path().generic_u8string(), sub_prefix);
 					addDir(dir_path, sub_prefix);
@@ -137,7 +139,7 @@ bool FileServe::addDir(std::string_view dir_path, std::string_view prefix) {
 
 				FileEntry fe{
 					std::string{dir_path},
-					(prefix.empty() ? "" : std::string{prefix} + "/") + filename,
+					(prefix.empty() ? "" : std::string{prefix} + "/") + reinterpret_cast<const char*>(filename.c_str()),
 					file_size
 				};
 				addEntry(std::move(fe));
@@ -302,10 +304,39 @@ bool FileServe::comSearch(std::string_view params, Message3Handle m) {
 		return true;
 	}
 
-	std::map<size_t, size_t> dist_to_file;
+	std::multimap<size_t, size_t> dist_to_file;
 	for (size_t i = 0; i < _file_list.size(); i++) {
 		const auto& entry = _file_list.at(i);
-		dist_to_file[levenshtein_n(entry.filename.c_str(), entry.filename.size(), params.data(), params.size())] = i;
+
+		size_t dist_sum = 0;
+		// TODO: replace more seperators with space eg -, _
+		for (const auto word : std::views::split(params, std::string_view{" "})) {
+			std::string_view sub_term {word.begin(), word.end()};
+
+			if (sub_term.empty()) continue;
+
+			if (entry.filename.size() <= sub_term.size()) {
+				dist_sum += levenshtein_n(entry.filename.c_str(), entry.filename.size(), sub_term.data(), sub_term.size());
+			} else {
+				// move window of search term size over filename, and remember lowest edit distance
+				size_t min_dist = 1000u;
+				for (size_t j = 0; j+params.size() < entry.filename.size(); j++) {
+					const size_t dist = levenshtein_n(entry.filename.c_str()+j, sub_term.size(), sub_term.data(), sub_term.size());
+					if (dist == 0) {
+						min_dist = 0;
+						break;
+					}
+					if (dist < min_dist) {
+						min_dist = dist;
+					}
+				}
+				dist_sum += min_dist;
+			}
+		}
+		dist_to_file.insert({
+			dist_sum,
+			i
+		});
 	}
 
 	_rmm.sendText(

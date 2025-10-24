@@ -5,7 +5,7 @@ add_library(fileserve
 	./fileserve.cpp
 )
 target_include_directories(fileserve PUBLIC .)
-target_compile_features(fileserve PUBLIC cxx_std_17)
+target_compile_features(fileserve PUBLIC cxx_std_20)
 target_link_libraries(fileserve PUBLIC
 	solanaceae_contact
 	solanaceae_message3

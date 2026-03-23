@@ -10,7 +10,7 @@ env:
   BUILD_TYPE: Debug
 
 jobs:
-  linux:
+  linux-ubuntu-latest:
     timeout-minutes: 10
 
     runs-on: ubuntu-latest
@@ -25,8 +25,28 @@ jobs:
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -j 4
 
     - name: Test
-      working-directory: ${{github.workspace}}/build
-      run: ctest -C ${{env.BUILD_TYPE}}
+      run: ctest --test-dir ${{github.workspace}}/build -C ${{env.BUILD_TYPE}}
+
+  linux-debian12:
+    timeout-minutes: 10
+
+    runs-on: ubuntu-latest
+    container: debian:12
+
+    steps:
+    - name: Install Dependencies
+      run: apt update && apt -y install git build-essential pkg-config cmake ninja-build
+
+    - uses: actions/checkout@v6
+
+    - name: Configure CMake
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DSOLANACEAE_ECOSYSTEM_BUILD_TESTING=ON
+
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -j 4
+
+    - name: Test
+      run: ctest --test-dir ${{github.workspace}}/build -C ${{env.BUILD_TYPE}}
 
   macos:
     timeout-minutes: 10
@@ -43,8 +63,7 @@ jobs:
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -j 3
 
     - name: Test
-      working-directory: ${{github.workspace}}/build
-      run: ctest -C ${{env.BUILD_TYPE}}
+      run: ctest --test-dir ${{github.workspace}}/build -C ${{env.BUILD_TYPE}}
 
   windows:
     timeout-minutes: 10
@@ -66,6 +85,4 @@ jobs:
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -j 3
 
     - name: Test
-      working-directory: ${{github.workspace}}/build
-      run: ctest -C ${{env.BUILD_TYPE}}
-
+      run: ctest --test-dir ${{github.workspace}}/build -C ${{env.BUILD_TYPE}}
